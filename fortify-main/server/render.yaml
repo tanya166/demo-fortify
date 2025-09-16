@@ -1,35 +1,26 @@
-# server/render.yaml - FIXED VERSION
+# server/render.yaml - WORKING VERSION
 services:
   - type: web
     name: smart-contract-security-backend
     runtime: node
     plan: starter
     buildCommand: |
-      # Install system dependencies first
-      apt-get update && apt-get install -y python3 python3-pip python3-venv
-      
-      # Create virtual environment for Python tools
-      python3 -m venv /opt/render/project/venv
-      source /opt/render/project/venv/bin/activate
-      
-      # Install Slither analyzer
-      pip install slither-analyzer
-      
       # Install Node.js dependencies
       npm install
+      
+      # Install Slither in user space (no sudo needed)
+      pip3 install --user slither-analyzer
       
       # Verify installations
       echo "=== Verification ==="
       node --version
       npm --version  
       python3 --version
-      pip --version
-      slither --version
+      pip3 --version
+      ~/.local/bin/slither --version
       echo "=== Build Complete ==="
       
-    startCommand: |
-      # Activate Python environment and start server
-      source /opt/render/project/venv/bin/activate && npm start
+    startCommand: npm start
       
     healthCheckPath: /health
     
@@ -38,6 +29,8 @@ services:
         value: production
       - key: PORT
         value: 3000
+      - key: PATH
+        value: /home/render/.local/bin:/usr/local/bin:/usr/bin:/bin
       - key: FRONTEND_URL
         sync: false
       - key: INFURA_RPC_URL
@@ -48,7 +41,3 @@ services:
         sync: false
       - key: RISK_THRESHOLD
         value: 7.0
-      - key: PATH
-        value: /opt/render/project/venv/bin:/usr/local/bin:/usr/bin:/bin
-      - key: PYTHONPATH
-        value: /opt/render/project/venv/lib/python3.9/site-packages
