@@ -1,237 +1,248 @@
-// server/routes/deployRoutes.js
+// server/routes/existing.js - ENHANCED ERROR HANDLING
 const express = require('express');
 const router = express.Router();
-const { assessAndProtectContract, RISK_THRESHOLD } = require('../services/riskAssessmentExisting');
-const { fetchContractDetails, extractSolidityCode } = require("../services/blockchainService");
+const { fetchContractDetails, extractSolidityCode } = require('../services/blockchainService');
 const securityAnalysisService = require('../services/securityAnalysisService');
+const { assessAndProtectContract } = require('../services/riskAssessmentExisting');
 
-// POST /api/deploy/analyze-and-deploy - Complete automated flow
-router.post('/analyze-and-deploy', async (req, res) => {
-    try {
-        const { contractAddress } = req.body;
-
-        if (!contractAddress) {
-            return res.status(400).json({ 
-                success: false,
-                error: "Contract address is required" 
-            });
-        }
-
-        console.log(`🚀 Starting complete analysis and deployment flow for: ${contractAddress}`);
-        console.log("📥 STEP 1: Fetching contract from blockchain...");
-        const contractDetails = await fetchContractDetails(contractAddress);
-
-        if (!contractDetails || !contractDetails.rawSourceCode) {
-            return res.status(404).json({
-                success: false,
-                error: "No verified contract found at this address"
-            });
-        }
-
-        console.log("✅ Contract details fetched successfully");
-
-        // STEP 2: Extract Solidity code
-        console.log("🔧 STEP 2: Extracting Solidity code...");
-        const extractedCode = extractSolidityCode(contractDetails.rawSourceCode);
-
-        if (!extractedCode || extractedCode.trim().length === 0) {
-            return res.status(400).json({
-                success: false,
-                error: "No valid Solidity code found in contract",
-                debug: {
-                    hasRawSource: !!contractDetails.rawSourceCode,
-                    rawSourceLength: contractDetails.rawSourceCode?.length || 0,
-                    extractedLength: extractedCode?.length || 0
-                }
-            });
-        }
-
-        console.log(`✅ Extracted ${extractedCode.length} characters of Solidity code`);
-
-        // STEP 3: Send code to SecurityAnalysisService (with Slither)
-        console.log("🔍 STEP 3: Running security analysis with Slither...");
-        console.log("📤 Code preview:", extractedCode.substring(0, 100) + "...");
-
-        let analysisResult;
-        try {
-            // Use your SecurityAnalysisService instead of external ML API
-            analysisResult = await securityAnalysisService.analyzeContract(extractedCode);
-
-            if (!analysisResult.success) {
-                return res.status(500).json({
-                    success: false,
-                    error: "Security analysis failed",
-                    details: analysisResult.error || "Unknown analysis error"
-                });
-            }
-
-            console.log(`✅ Security analysis complete - Risk Score: ${analysisResult.riskScore}`);
-            console.log(`🔍 Found ${analysisResult.vulnerabilities.length} vulnerabilities`);
-            console.log(`🛡️ Slither used: ${analysisResult.slitherUsed}`);
-
-        } catch (analysisError) {
-            console.error("❌ Security analysis failed:", analysisError.message);
-            
-            return res.status(500).json({
-                success: false,
-                error: "Security analysis failed",
-                details: analysisError.message,
-                suggestion: "Check if Slither is properly installed"
-            });
-        }
-
-        // STEP 4: Extract risk score and vulnerabilities
-        const riskScore = analysisResult.riskScore;
-        const interpretation = analysisResult.interpretation;
-        const vulnerabilities = analysisResult.vulnerabilities;
-
-        if (riskScore === undefined || riskScore === null) {
-            return res.status(500).json({
-                success: false,
-                error: "Security analysis returned invalid risk score",
-                analysisResult: analysisResult
-            });
-        }
-
-        console.log(`📊 STEP 4: Security Analysis complete - Risk Score: ${riskScore}`);
-
-        // STEP 5: Send to risk assessment and protection service
-        console.log("🛡️ STEP 5: Performing risk assessment and potential protection deployment...");
-        const assessmentResult = await assessAndProtectContract(
-            contractAddress, 
-            riskScore, 
-            {
-                interpretation,
-                vulnerabilities,
-                slitherUsed: analysisResult.slitherUsed,
-                summary: analysisResult.summary
-            }
-        );
-
-        console.log(`✅ Assessment complete: ${assessmentResult.action}`);
-
-        // STEP 6: Return comprehensive response
-        const response = {
-            success: true,
-            flow: "Contract Address → Fetch → Security Analysis (Slither) → Risk Assessment → Protection",
-            contractAddress,
-            securityAnalysis: {
-                riskScore,
-                interpretation,
-                vulnerabilityCount: vulnerabilities.length,
-                slitherUsed: analysisResult.slitherUsed,
-                summary: analysisResult.summary,
-                threshold: RISK_THRESHOLD
-            },
-            vulnerabilities: vulnerabilities.map(vuln => ({
-                tool: vuln.tool,
-                type: vuln.type,
-                severity: vuln.severity,
-                description: vuln.description,
-                recommendation: vuln.recommendation
-            })),
-            assessment: assessmentResult,
-            timestamp: new Date().toISOString()
-        };
-
-        console.log("🎉 Complete flow finished successfully!");
-        res.json(response);
-
-    } catch (error) {
-        console.error("❌ Complete analysis flow failed:", error);
-        res.status(500).json({
-            success: false,
-            error: "Complete analysis flow failed",
-            details: error.message,
-            stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
-        });
-    }
-});
-
-// POST /api/deploy/check-only - Just check risk score without deploying
+// Risk check only - no protection deployment
 router.post('/check-only', async (req, res) => {
     try {
+        console.log('🔍 Risk check endpoint called');
+        
         const { contractAddress } = req.body;
 
         if (!contractAddress) {
-            return res.status(400).json({ 
-                success: false,
-                error: "Contract address is required" 
-            });
-        }
-
-        console.log(`🔍 Risk check only for: ${contractAddress}`);
-
-        // Steps 1-2: Fetch and extract code
-        const contractDetails = await fetchContractDetails(contractAddress);
-        
-        if (!contractDetails || !contractDetails.rawSourceCode) {
-            return res.status(404).json({
-                success: false,
-                error: "No verified contract found at this address"
-            });
-        }
-
-        const extractedCode = extractSolidityCode(contractDetails.rawSourceCode);
-        
-        if (!extractedCode) {
             return res.status(400).json({
                 success: false,
-                error: "No valid Solidity code found"
+                error: 'Contract address is required'
             });
         }
 
-        // Step 3: Get security analysis using SecurityAnalysisService
-        const analysisResult = await securityAnalysisService.analyzeContract(extractedCode);
-        
-        if (!analysisResult.success) {
+        console.log(`📍 Analyzing contract: ${contractAddress}`);
+
+        // Step 1: Fetch contract details
+        let contractDetails;
+        try {
+            contractDetails = await fetchContractDetails(contractAddress);
+        } catch (fetchError) {
+            console.error('❌ Contract fetch failed:', fetchError.message);
+            return res.status(404).json({
+                success: false,
+                error: `Failed to fetch contract: ${fetchError.message}`,
+                details: 'Contract may not exist or may not be verified on Etherscan'
+            });
+        }
+
+        // Step 2: Extract Solidity code
+        let solidityCode;
+        try {
+            solidityCode = extractSolidityCode(contractDetails.rawSourceCode);
+            
+            if (!solidityCode || solidityCode.trim() === '') {
+                throw new Error('No valid Solidity code found');
+            }
+        } catch (extractError) {
+            console.error('❌ Code extraction failed:', extractError.message);
+            return res.status(400).json({
+                success: false,
+                error: 'Failed to extract Solidity code',
+                details: extractError.message
+            });
+        }
+
+        // Step 3: Perform security analysis
+        let analysisResult;
+        try {
+            console.log('🔍 Running security analysis...');
+            analysisResult = await securityAnalysisService.analyzeContract(solidityCode);
+            
+            if (!analysisResult.success) {
+                throw new Error(analysisResult.error || 'Analysis failed');
+            }
+        } catch (analysisError) {
+            console.error('❌ Security analysis failed:', analysisError.message);
             return res.status(500).json({
                 success: false,
-                error: "Security analysis failed",
-                details: analysisResult.error
+                error: 'Security analysis failed',
+                details: analysisError.message
             });
         }
 
-        const riskScore = analysisResult.riskScore;
-        const interpretation = analysisResult.interpretation;
+        // Step 4: Determine if protection would be deployed
+        const riskThreshold = parseFloat(process.env.RISK_THRESHOLD || '7.0');
+        const wouldDeploy = analysisResult.riskScore >= riskThreshold;
 
-        // Only assess, don't deploy
-        const wouldDeploy = riskScore >= RISK_THRESHOLD;
-        const recommendation = wouldDeploy 
-            ? "CRITICAL/HIGH RISK - Recommend deploying SecurityProxy"
-            : "LOW/MEDIUM RISK - No protection needed";
+        console.log(`✅ Risk check complete: Score ${analysisResult.riskScore}, Threshold ${riskThreshold}`);
 
         res.json({
             success: true,
             contractAddress,
             securityAnalysis: {
-                riskScore,
-                interpretation,
-                vulnerabilityCount: analysisResult.vulnerabilities.length,
-                slitherUsed: analysisResult.slitherUsed,
-                summary: analysisResult.summary,
-                threshold: RISK_THRESHOLD,
-                wouldDeploy,
-                recommendation
+                riskScore: analysisResult.riskScore,
+                interpretation: analysisResult.interpretation,
+                threshold: riskThreshold,
+                wouldDeploy
             },
-            vulnerabilities: analysisResult.vulnerabilities.map(vuln => ({
-                tool: vuln.tool,
-                type: vuln.type,
-                severity: vuln.severity,
-                description: vuln.description,
-                recommendation: vuln.recommendation
-            })),
-            note: "This was a check-only operation. No SecurityProxy was deployed."
+            vulnerabilities: analysisResult.vulnerabilities || [],
+            summary: analysisResult.summary || {},
+            slitherUsed: analysisResult.slitherUsed || false,
+            recommendations: analysisResult.recommendations || []
         });
 
     } catch (error) {
-        console.error("❌ Risk check failed:", error);
+        console.error('❌ Risk check error:', error);
         res.status(500).json({
             success: false,
-            error: "Risk check failed",
+            error: 'Risk check failed',
             details: error.message
         });
     }
+});
+
+// Complete analysis and protection pipeline
+router.post('/analyze-and-deploy', async (req, res) => {
+    try {
+        console.log('🛡️ Complete protection pipeline started');
+        
+        const { contractAddress } = req.body;
+
+        if (!contractAddress) {
+            return res.status(400).json({
+                success: false,
+                error: 'Contract address is required'
+            });
+        }
+
+        console.log(`🎯 Processing contract: ${contractAddress}`);
+
+        // Step 1: Fetch contract details
+        let contractDetails;
+        try {
+            contractDetails = await fetchContractDetails(contractAddress);
+        } catch (fetchError) {
+            console.error('❌ Contract fetch failed:', fetchError.message);
+            return res.status(404).json({
+                success: false,
+                error: `Contract fetch failed: ${fetchError.message}`,
+                details: 'Contract may not exist or not be verified'
+            });
+        }
+
+        // Step 2: Extract Solidity code
+        let solidityCode;
+        try {
+            solidityCode = extractSolidityCode(contractDetails.rawSourceCode);
+            
+            if (!solidityCode || solidityCode.trim() === '') {
+                throw new Error('No valid Solidity code extracted');
+            }
+            
+            console.log(`📝 Code extracted: ${solidityCode.length} characters`);
+        } catch (extractError) {
+            console.error('❌ Code extraction failed:', extractError.message);
+            return res.status(400).json({
+                success: false,
+                error: 'Failed to extract contract code',
+                details: extractError.message
+            });
+        }
+
+        // Step 3: Security Analysis
+        let analysisResult;
+        try {
+            console.log('🔍 Running comprehensive security analysis...');
+            analysisResult = await securityAnalysisService.analyzeContract(solidityCode);
+            
+            if (!analysisResult.success) {
+                throw new Error(analysisResult.error || 'Security analysis failed');
+            }
+            
+            console.log(`📊 Analysis complete: Risk ${analysisResult.riskScore}, Vulns: ${analysisResult.vulnerabilities.length}`);
+        } catch (analysisError) {
+            console.error('❌ Security analysis error:', analysisError.message);
+            return res.status(500).json({
+                success: false,
+                error: 'Security analysis failed',
+                details: analysisError.message,
+                contractAddress
+            });
+        }
+
+        // Step 4: Risk Assessment & Protection Decision
+        let assessmentResult;
+        try {
+            console.log('⚖️ Performing risk assessment...');
+            assessmentResult = await assessAndProtectContract(
+                contractAddress, 
+                analysisResult.riskScore, 
+                analysisResult
+            );
+            
+            console.log(`⚖️ Assessment result: ${assessmentResult.action}`);
+        } catch (assessmentError) {
+            console.error('❌ Risk assessment failed:', assessmentError.message);
+            return res.status(500).json({
+                success: false,
+                error: 'Risk assessment failed',
+                details: assessmentError.message,
+                contractAddress,
+                securityAnalysis: analysisResult
+            });
+        }
+
+        // Step 5: Return comprehensive results
+        const response = {
+            success: true,
+            contractAddress,
+            securityAnalysis: {
+                riskScore: analysisResult.riskScore,
+                interpretation: analysisResult.interpretation,
+                threshold: parseFloat(process.env.RISK_THRESHOLD || '7.0'),
+                vulnerabilitiesCount: analysisResult.vulnerabilities.length,
+                summary: analysisResult.summary
+            },
+            vulnerabilities: analysisResult.vulnerabilities || [],
+            assessment: assessmentResult,
+            slitherUsed: analysisResult.slitherUsed || false,
+            recommendations: analysisResult.recommendations || [],
+            timestamp: new Date().toISOString()
+        };
+
+        console.log(`✅ Pipeline complete: ${assessmentResult.action}`);
+        
+        if (assessmentResult.action === 'PROTECTED') {
+            console.log(`🛡️ SecurityProxy deployed: ${assessmentResult.proxyAddress}`);
+        }
+
+        res.json(response);
+
+    } catch (error) {
+        console.error('❌ Complete pipeline error:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Complete analysis flow failed',
+            details: error.message,
+            timestamp: new Date().toISOString()
+        });
+    }
+});
+
+// Health check endpoint for the existing contracts service
+router.get('/health', (req, res) => {
+    res.json({
+        status: 'OK',
+        service: 'existing-contracts',
+        features: [
+            'Risk assessment for deployed contracts',
+            'Automatic SecurityProxy deployment',
+            'Comprehensive vulnerability analysis'
+        ],
+        endpoints: {
+            'POST /api/risk/check-only': 'Risk assessment only',
+            'POST /api/risk/analyze-and-deploy': 'Full protection pipeline'
+        }
+    });
 });
 
 module.exports = router;
