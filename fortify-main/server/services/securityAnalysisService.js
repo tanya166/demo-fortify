@@ -289,62 +289,144 @@ class SecurityAnalysisService {
 
         return vulnerabilities;
     }
-
-    // IMPROVED Slither execution with better error handling
+// IMPROVED Slither execution with better error handling and debugging
     async runSlitherAnalysis(contractPath) {
         try {
             console.log('🔍 Running Slither analysis...');
+            console.log('📁 Contract path:', contractPath);
 
-            // Check if Slither is available
-            try {
-                await execAsync('slither --version', { timeout: 5000 });
-            } catch (err) {
-                console.log('❌ Slither not found');
-                return { success: false, error: 'Slither not installed' };
+            // Enhanced Slither availability check with multiple paths
+            console.log('🔍 Checking Slither availability...');
+            const slitherPaths = [
+                'slither',
+                '~/.local/bin/slither',
+                '/home/render/.local/bin/slither'
+            ];
+
+            let slitherCommand = null;
+            for (const path of slitherPaths) {
+                try {
+                    const { stdout } = await execAsync(`${path} --version`, { timeout: 5000 });
+                    console.log(`✅ Found Slither at ${path}:`, stdout.trim());
+                    slitherCommand = path;
+                    break;
+                } catch (err) {
+                    console.log(`❌ Slither not found at ${path}:`, err.message);
+                }
+            }
+
+            if (!slitherCommand) {
+                console.log('🔍 Checking PATH and installed packages...');
+                try {
+                    const { stdout: pathOutput } = await execAsync('echo $PATH', { timeout: 3000 });
+                    console.log('📍 Current PATH:', pathOutput.trim());
+                } catch (e) {
+                    console.log('❌ Could not check PATH');
+                }
+
+                try {
+                    const { stdout: lsOutput } = await execAsync('ls -la ~/.local/bin/ | grep slither', { timeout: 3000 });
+                    console.log('📍 Slither files found:', lsOutput.trim());
+                } catch (e) {
+                    console.log('❌ No slither files in ~/.local/bin/');
+                }
+
+                try {
+                    const { stdout: pipOutput } = await execAsync('pip3 list | grep slither', { timeout: 5000 });
+                    console.log('📍 Slither pip package:', pipOutput.trim());
+                } catch (e) {
+                    console.log('❌ Slither not found in pip list');
+                }
+
+                return { success: false, error: 'Slither not found in any expected location' };
             }
 
             const resultJsonPath = path.join(path.dirname(contractPath), `slither_result_${Date.now()}.json`);
+            console.log('📁 Output will be saved to:', resultJsonPath);
+
+            // Check if contract file exists and is readable
+            if (!fs.existsSync(contractPath)) {
+                return { success: false, error: 'Contract file does not exist' };
+            }
+            
+            console.log('📄 Contract file size:', fs.statSync(contractPath).size, 'bytes');
 
             // Use more comprehensive Slither detectors
-            const slitherCommand = `slither "${contractPath}" --json "${resultJsonPath}" --exclude-informational --exclude-optimization --exclude naming-convention`;
+            const fullSlitherCommand = `${slitherCommand} "${contractPath}" --json "${resultJsonPath}" --exclude-informational --exclude-optimization --exclude naming-convention`;
 
-            console.log('Running Slither command:', slitherCommand);
+            console.log('🚀 Running Slither command:', fullSlitherCommand);
             
+            let execResult;
             try {
-                await execAsync(slitherCommand, { 
+                execResult = await execAsync(fullSlitherCommand, { 
                     timeout: 45000,
                     maxBuffer: 1024 * 1024 * 2
                 });
+                console.log('✅ Slither stdout:', execResult.stdout);
+                if (execResult.stderr) {
+                    console.log('⚠️ Slither stderr:', execResult.stderr);
+                }
             } catch (execError) {
                 // Slither often returns non-zero exit codes even on success
-                console.log('Slither completed with exit code:', execError.code);
+                console.log('⚠️ Slither completed with exit code:', execError.code);
+                console.log('📤 Slither stdout:', execError.stdout || 'No stdout');
+                console.log('📤 Slither stderr:', execError.stderr || 'No stderr');
+                
+                // Don't immediately fail - check if output file was created
             }
 
+            console.log('🔍 Checking for output file...');
             if (!fs.existsSync(resultJsonPath)) {
+                console.log('❌ Slither output file not found at:', resultJsonPath);
+                
+                // Check if any files were created in the directory
+                try {
+                    const dirContents = fs.readdirSync(path.dirname(contractPath));
+                    console.log('📁 Directory contents:', dirContents);
+                } catch (e) {
+                    console.log('❌ Could not read directory contents');
+                }
+                
                 return { success: false, error: 'Slither did not produce output file' };
             }
 
+            console.log('✅ Output file found, reading...');
             let slitherOutput;
             try {
                 const fileContent = fs.readFileSync(resultJsonPath, 'utf-8');
+                console.log('📄 Raw output length:', fileContent.length, 'characters');
+                console.log('📄 Raw output preview:', fileContent.substring(0, 200));
+                
                 slitherOutput = JSON.parse(fileContent);
+                console.log('✅ Successfully parsed Slither JSON');
             } catch (parseError) {
                 console.log('❌ Failed to parse Slither JSON:', parseError.message);
+                try {
+                    const rawContent = fs.readFileSync(resultJsonPath, 'utf-8');
+                    console.log('📄 Unparseable content:', rawContent.substring(0, 500));
+                } catch (e) {
+                    console.log('❌ Could not read raw content');
+                }
                 return { success: false, error: 'Invalid Slither output' };
             }
 
             // Clean up
             try { 
                 fs.unlinkSync(resultJsonPath); 
-            } catch(e) {}
+                console.log('🗑️ Cleaned up output file');
+            } catch(e) {
+                console.log('⚠️ Could not clean up output file:', e.message);
+            }
 
-            console.log('✅ Slither analysis completed');
-            console.log(`Found ${slitherOutput.results?.detectors?.length || 0} detectors`);
+            console.log('✅ Slither analysis completed successfully');
+            console.log(`📊 Found ${slitherOutput.results?.detectors?.length || 0} detectors`);
+            console.log(`📊 Found ${slitherOutput.results?.printers?.length || 0} printers`);
             
             return { success: true, results: slitherOutput };
 
         } catch (error) {
-            console.log('⚠️ Slither analysis failed:', error.message);
+            console.log('💥 Slither analysis failed with error:', error.message);
+            console.log('💥 Error stack:', error.stack);
             return { success: false, error: error.message };
         }
     }
