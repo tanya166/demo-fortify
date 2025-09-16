@@ -1,24 +1,50 @@
-# server/render.yaml - WORKING VERSION
+# server/render.yaml - FIXED VERSION
 services:
   - type: web
     name: smart-contract-security-backend
     runtime: node
     plan: starter
     buildCommand: |
-      # Install Node.js dependencies
+      # Install Node.js dependencies first
       npm install
       
-      # Install Slither in user space (no sudo needed)
-      pip3 install --user slither-analyzer
+      # Create .local/bin directory if it doesn't exist
+      mkdir -p ~/.local/bin
       
-      # Verify installations
-      echo "== Verification =="
-      node --version
-      npm --version  
-      python3 --version
-      pip3 --version
-      ~/.local/bin/slither --version
-      echo "=== Build Complete ==="
+      # Install Slither with explicit path and upgrade pip first
+      python3 -m pip install --upgrade pip --user
+      python3 -m pip install --user slither-analyzer --verbose
+      
+      # Make sure the binary is executable
+      chmod +x ~/.local/bin/slither 2>/dev/null || echo "Slither binary not found in expected location"
+      
+      # Verify installations with detailed output
+      echo "=== VERIFICATION ==="
+      echo "Node version:" $(node --version)
+      echo "NPM version:" $(npm --version)
+      echo "Python version:" $(python3 --version)
+      echo "Pip version:" $(python3 -m pip --version)
+      echo "PATH: $PATH"
+      echo "Home directory: $HOME"
+      echo "Current user: $(whoami)"
+      
+      # Check if slither was installed
+      echo "Checking pip list for slither:"
+      python3 -m pip list --user | grep -i slither || echo "Slither not found in pip list"
+      
+      # Check .local/bin contents
+      echo "Contents of ~/.local/bin:"
+      ls -la ~/.local/bin/ 2>/dev/null || echo "~/.local/bin does not exist"
+      
+      # Try to find slither binary
+      echo "Looking for slither binary:"
+      find ~/.local -name "*slither*" -type f 2>/dev/null || echo "No slither binary found"
+      
+      # Test slither command
+      echo "Testing slither command:"
+      ~/.local/bin/slither --version 2>/dev/null || echo "Slither command failed"
+      
+      echo "=== BUILD COMPLETE ==="
       
     startCommand: npm start
       
@@ -30,7 +56,9 @@ services:
       - key: PORT
         value: 3000
       - key: PATH
-        value: /home/render/.local/bin:/usr/local/bin:/usr/bin:/bin
+        value: ~/.local/bin:/opt/render/project/src/.venv/bin:/usr/local/bin:/usr/bin:/bin
+      - key: PYTHONPATH
+        value: ~/.local/lib/python3.11/site-packages:~/.local/lib/python3.10/site-packages:~/.local/lib/python3.9/site-packages
       - key: FRONTEND_URL
         sync: false
       - key: INFURA_RPC_URL
@@ -40,4 +68,4 @@ services:
       - key: ETHERSCAN_API_KEY
         sync: false
       - key: RISK_THRESHOLD
-        value: 7.0
+        value: 60.0
