@@ -12,7 +12,7 @@ services:
       pip3 install --user slither-analyzer
       
       # Verify installations
-      echo "=== Verification ==="
+      echo "== Verification =="
       node --version
       npm --version  
       python3 --version
