@@ -1,27 +1,54 @@
+# server/render.yaml - FIXED VERSION
 services:
   - type: web
     name: smart-contract-security-backend
     runtime: node
-    plan: starter  # or free
-    buildCommand: npm install
-    startCommand: npm start
+    plan: starter
+    buildCommand: |
+      # Install system dependencies first
+      apt-get update && apt-get install -y python3 python3-pip python3-venv
+      
+      # Create virtual environment for Python tools
+      python3 -m venv /opt/render/project/venv
+      source /opt/render/project/venv/bin/activate
+      
+      # Install Slither analyzer
+      pip install slither-analyzer
+      
+      # Install Node.js dependencies
+      npm install
+      
+      # Verify installations
+      echo "=== Verification ==="
+      node --version
+      npm --version  
+      python3 --version
+      pip --version
+      slither --version
+      echo "=== Build Complete ==="
+      
+    startCommand: |
+      # Activate Python environment and start server
+      source /opt/render/project/venv/bin/activate && npm start
+      
     healthCheckPath: /health
+    
     envVars:
       - key: NODE_ENV
         value: production
       - key: PORT
         value: 3000
       - key: FRONTEND_URL
-        sync: false  # Set this manually in Render dashboard
+        sync: false
       - key: INFURA_RPC_URL
-        sync: false  # Set this manually in Render dashboard
+        sync: false
       - key: PRIVATE_KEY
-        sync: false  # Set this manually in Render dashboard  
+        sync: false
       - key: ETHERSCAN_API_KEY
-        sync: false  # Set this manually in Render dashboard
+        sync: false
       - key: RISK_THRESHOLD
         value: 7.0
-    # Optional: Set up auto-deploy from GitHub
-    # repo: https://github.com/your-username/your-repo
-    # branch: main
-    # rootDir: server  # if your server code is in a subdirectory
+      - key: PATH
+        value: /opt/render/project/venv/bin:/usr/local/bin:/usr/bin:/bin
+      - key: PYTHONPATH
+        value: /opt/render/project/venv/lib/python3.9/site-packages
